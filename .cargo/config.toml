@@ -1,0 +1,17 @@
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+rustflags = [
+  "-C", "link-arg=-Tlink.x",
+  # This is needed if your flash or ram addresses are not aligned to 0x10000 in memory.x
+  # See https://github.com/rust-embedded/cortex-m-quickstart/pull/95
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+[build]
+target = "thumbv6m-none-eabi"    # Cortex-M0 and Cortex-M0+
+
+[env]
+# defmtログレベルを制御（trace < debug < info < warn < error）
+DEFMT_LOG = "info"
+# 特定のクレートのログを無効化
+DEFMT_FILTER = "main=info,embassy_rp=warn,cyw43=warn,cyw43_pio=warn"
