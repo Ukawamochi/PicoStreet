@@ -6,7 +6,6 @@ use defmt::info;
 use embassy_time::{Duration, Timer, Instant};
 use embassy_futures::join::join;
 
-use embassy_rp::gpio::Output;
 
 use trouble_host::advertise::{AdStructure, Advertisement, AdvertisementParameters};
 use trouble_host::prelude::*;
@@ -117,13 +116,19 @@ where
         let mut params = AdvertisementParameters::default();
         params.interval_min = Duration::from_millis(1200);
         params.interval_max = Duration::from_millis(1500);
-        let _advertiser = peripheral
+        let _advertiser = match peripheral
             .advertise(
                 &params,
                 Advertisement::NonconnectableNonscannableUndirected { adv_data: ad },
             )
             .await
-            .unwrap();
+        {
+            Ok(h) => h,
+            Err(_) => {
+                info!("advertise() failed; entering error blink loop");
+                crate::leds::error_blink_loop(control).await;
+            }
+        };
 
         // スキャン再始動ポンプと送信インジケータのパルスを並列実行
         let scan_pump = async {
@@ -134,7 +139,13 @@ where
             cfg.timeout = Duration::from_millis(0);
             let mut last_pulse = Instant::now();
             loop {
-                let session = scanner.scan(&cfg).await.unwrap();
+                let session = match scanner.scan(&cfg).await {
+                    Ok(s) => s,
+                    Err(_) => {
+                        info!("scan() failed; entering error blink loop");
+                        crate::leds::error_blink_loop(control).await;
+                    }
+                };
                 // イベント処理に譲る
                 Timer::after(Duration::from_millis(20)).await;
                 core::mem::drop(session);

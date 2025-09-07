@@ -70,12 +70,12 @@ async fn main(spawner: Spawner) {
     control.gpio_set(0, false).await;
     info!("CYW43 initialized");
     
-    // Bluetooth初期化完了を待つ（BTファームウェア読み込み完了まで）
-    info!("Waiting for Bluetooth initialization to complete...");
-    embassy_time::Timer::after_millis(1000).await;
-
-    // 自デバイス BD_ADDR 取得
+    // 自デバイス BD_ADDR 取得（取得失敗時はエラーインジケータを繰り返す）
     let self_bd_addr = device_id::get_bd_addr(&mut control).await;
+    if self_bd_addr == [0u8; 6] {
+        warn!("Failed to obtain BD_ADDR; entering error blink loop");
+        leds::error_blink_loop(&mut control).await;
+    }
     let bd_str = fmt_bytes_colon(&self_bd_addr);
     info!("SELF bd_addr={}", bd_str.as_str());
 
