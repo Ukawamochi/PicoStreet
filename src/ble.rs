@@ -3,7 +3,7 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use defmt::info;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Timer, Instant};
 use embassy_futures::join::join;
 
 use embassy_rp::gpio::Output;
@@ -81,7 +81,6 @@ fn build_advertisement_data<'a>(buf: &'a mut [u8], payload: &'a [u8]) -> &'a [u8
 pub async fn advertise_and_scan_loop<C>(
     controller: C,
     control: &mut cyw43::Control<'_>,
-    rx_led: &mut Output<'_>,
     self_bd_addr: [u8; 6],
 ) -> !
 where
@@ -133,6 +132,7 @@ where
             cfg.interval = Duration::from_millis(200);
             cfg.window = Duration::from_millis(150);
             cfg.timeout = Duration::from_millis(0);
+            let mut last_pulse = Instant::now();
             loop {
                 let session = scanner.scan(&cfg).await.unwrap();
                 // イベント処理に譲る
@@ -140,26 +140,20 @@ where
                 core::mem::drop(session);
                 // 過剰なHCIを避けるため小休止
                 Timer::after(Duration::from_millis(5)).await;
-                // 受信LED要求があれば点滅
+                // 受信インジケータ（高速点滅）
                 if RX_PULSES.load(Ordering::Relaxed) > 0 {
                     let v = RX_PULSES.load(Ordering::Relaxed);
                     if v > 0 { RX_PULSES.store(v - 1, Ordering::Relaxed); }
-                    crate::leds::blink_rx(rx_led, 120).await;
+                    crate::leds::blink_rx_fast(control).await;
+                }
+                // 送信インジケータ（100ms点灯を1秒周期）
+                if Instant::now() - last_pulse >= Duration::from_millis(1000) {
+                    crate::leds::blink_tx(control, 100).await;
+                    last_pulse = Instant::now();
                 }
             }
         };
-
-        let tx_pulse = async {
-            loop {
-                // 送信インジケータ（内蔵LED）: 短フラッシュを1秒周期
-                control.gpio_set(0, true).await;
-                Timer::after(Duration::from_millis(80)).await;
-                control.gpio_set(0, false).await;
-                Timer::after(Duration::from_millis(920)).await;
-            }
-        };
-
-        let _ = embassy_futures::join::join(scan_pump, tx_pulse).await;
+        scan_pump.await;
     }).await;
 
     // 終了しない

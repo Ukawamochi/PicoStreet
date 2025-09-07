@@ -79,17 +79,12 @@ async fn main(spawner: Spawner) {
     let bd_str = fmt_bytes_colon(&self_bd_addr);
     info!("SELF bd_addr={}", bd_str.as_str());
 
-    // GPIO18 外付け LED 初期化
-    let mut rx_led = Output::new(p.PIN_18, Level::Low);
-
-    // 起動確認: 内蔵LEDとGPIO18を短く点滅（各3回）
+    // 起動確認: 内蔵LEDを短く点滅（3回）
     for _ in 0..3 {
         control.gpio_set(0, true).await;
-        rx_led.set_high();
-        embassy_time::Timer::after_millis(400).await;
+        embassy_time::Timer::after_millis(150).await;
         control.gpio_set(0, false).await;
-        rx_led.set_low();
-        embassy_time::Timer::after_millis(300).await;
+        embassy_time::Timer::after_millis(150).await;
     }
 
     // BLE Host に接続
@@ -97,5 +92,5 @@ async fn main(spawner: Spawner) {
     info!("BLE host/controller wired");
 
     // 時分割ループ開始（広告→スキャン）
-    ble::advertise_and_scan_loop(controller, &mut control, &mut rx_led, self_bd_addr).await;
+    ble::advertise_and_scan_loop(controller, &mut control, self_bd_addr).await;
 }

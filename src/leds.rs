@@ -1,6 +1,4 @@
-//! LED制御（内蔵LED: WL_GPIO0、外付け GPIO18）
-
-use embassy_rp::gpio::Output;
+//! LED制御（内蔵LED: WL_GPIO0 のみ使用）
 use embassy_time::{Timer, Duration};
 
 /// TXフェーズ時の内蔵LED点灯（WL_GPIO0）。
@@ -12,9 +10,13 @@ pub async fn blink_tx(control: &mut cyw43::Control<'_>, ms: u64) {
     control.gpio_set(0, false).await;
 }
 
-/// RXフェーズでの検知時の外付けLED点灯（GPIO18, Active High）。
-pub async fn blink_rx(rx_led: &mut Output<'_>, ms: u64) {
-    rx_led.set_high();
-    Timer::after(Duration::from_millis(ms)).await;
-    rx_led.set_low();
+/// 受信検知時の内蔵LED高速点滅（視認性のため短い点滅を複数回）。
+pub async fn blink_rx_fast(control: &mut cyw43::Control<'_>) {
+    // 高速で3回点滅（50ms on / 50ms off）
+    for _ in 0..3 {
+        control.gpio_set(0, true).await;
+        Timer::after(Duration::from_millis(50)).await;
+        control.gpio_set(0, false).await;
+        Timer::after(Duration::from_millis(50)).await;
+    }
 }
