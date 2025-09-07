@@ -46,7 +46,7 @@ cargo flash --chip RP2040 --release
 - `cargo-embed` あるいは probe-rs RTT ビューアで `defmt::println!` 出力を確認できます。
 
 ## 注意（Pico W の LED について）
-- 現在のサンプルは `GPIO25` を点滅します。Pico W の内蔵 LED は Wi‑Fi モジュール（CYW43）経由で制御されるため、そのままでは点灯しません。
+- Pico W の内蔵 LED は Wi‑Fi モジュール（CYW43）経由で制御されるため、そのままでは点灯しません。
 - 内蔵 LED を使う場合は `cyw43` ドライバ等の導入とコード変更が必要です（無印向けの互換対応は行いません）。
 
 ## 構成
