@@ -112,54 +112,54 @@ where
     let mut ad_buf = [0u8; 31];
 
     let _ = join(runner.run_with_handler(&handler), async {
-        // ジッタは入れない（将来的に並列化予定のため、明示的に削除）
-        loop {
-            // TXフェーズ: 内蔵LEDを点灯して広告送信
-            info!("TX phase start");
-            control.gpio_set(0, true).await;
-            let ad = build_advertisement_data(&mut ad_buf, payload);
-            info!("TX adv_len={} ad={:x}", ad.len(), ad);
-            let mut params = AdvertisementParameters::default();
-            // 250ms間隔程度（仕様の目安）
-            params.interval_min = Duration::from_millis(250);
-            params.interval_max = Duration::from_millis(250);
-            let _advertiser = peripheral
-                .advertise(
-                    &params,
-                    Advertisement::NonconnectableNonscannableUndirected { adv_data: ad },
-                )
-                .await
-                .unwrap();
-            // TX フェーズ時間: 5秒
-            Timer::after(Duration::from_millis(5000)).await;
-            drop(_advertiser);
-            control.gpio_set(0, false).await;
+        // 広告をEnable維持
+        let ad = build_advertisement_data(&mut ad_buf, payload);
+        info!("Enable advertising len={}", ad.len());
+        let mut params = AdvertisementParameters::default();
+        params.interval_min = Duration::from_millis(1200);
+        params.interval_max = Duration::from_millis(1500);
+        let _advertiser = peripheral
+            .advertise(
+                &params,
+                Advertisement::NonconnectableNonscannableUndirected { adv_data: ad },
+            )
+            .await
+            .unwrap();
 
-            // RXフェーズ: スキャンして他デバイスを検出
-            info!("RX phase start");
+        // スキャン再始動ポンプと送信インジケータのパルスを並列実行
+        let scan_pump = async {
             let mut cfg = ScanConfig::default();
             cfg.active = false; // passive
             cfg.interval = Duration::from_millis(200);
             cfg.window = Duration::from_millis(150);
-            cfg.timeout = Duration::from_millis(0); // 無限（手動で停止）
-            let _session = scanner.scan(&cfg).await.unwrap();
-
-            let start = embassy_time::Instant::now();
-            // RX フェーズ時間: 10秒
-            while embassy_time::Instant::now() - start < Duration::from_millis(10_000) {
-                // パルスがあれば点滅
+            cfg.timeout = Duration::from_millis(0);
+            loop {
+                let session = scanner.scan(&cfg).await.unwrap();
+                // イベント処理に譲る
+                Timer::after(Duration::from_millis(20)).await;
+                core::mem::drop(session);
+                // 過剰なHCIを避けるため小休止
+                Timer::after(Duration::from_millis(5)).await;
+                // 受信LED要求があれば点滅
                 if RX_PULSES.load(Ordering::Relaxed) > 0 {
                     let v = RX_PULSES.load(Ordering::Relaxed);
                     if v > 0 { RX_PULSES.store(v - 1, Ordering::Relaxed); }
                     crate::leds::blink_rx(rx_led, 120).await;
-                } else {
-                    // 軽く待つ
-                    Timer::after(Duration::from_millis(20)).await;
                 }
             }
-            // _session drop -> scan 停止
-            core::mem::drop(_session);
-        }
+        };
+
+        let tx_pulse = async {
+            loop {
+                // 送信インジケータ（内蔵LED）: 短フラッシュを1秒周期
+                control.gpio_set(0, true).await;
+                Timer::after(Duration::from_millis(80)).await;
+                control.gpio_set(0, false).await;
+                Timer::after(Duration::from_millis(920)).await;
+            }
+        };
+
+        let _ = embassy_futures::join::join(scan_pump, tx_pulse).await;
     }).await;
 
     // 終了しない
