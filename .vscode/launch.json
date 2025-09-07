@@ -9,7 +9,7 @@
       "cwd": "${workspaceFolder}",
       "flashingConfig": {
         "flashingEnabled": true,
-        "haltAfterReset": true
+        "haltAfterReset": false
       },
       "coreConfigs": [
         {
