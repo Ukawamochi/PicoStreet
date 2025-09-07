@@ -53,8 +53,8 @@ fn build_advertisement_data<'a>(buf: &'a mut [u8], payload: &'a [u8]) -> &'a [u8
     let mut used = 0usize;
     // Flags (0x01) 0x06
     used += AdStructure::encode_slice(&[AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED)], &mut buf[used..]).unwrap();
-    // Complete List of 16-bit UUIDs (0x03)
-    used += AdStructure::encode_slice(&[AdStructure::ServiceUuids16(&[uuid16])], &mut buf[used..]).unwrap();
+    // NOTE: Service Data に UUID を含めるため、重複する Complete 16-bit UUIDs は省略
+    // 省略により全体 31B 制約内に収める（Flags 3B + ServiceData(4B+payload)）
     // Service Data (0x16)
     used += AdStructure::encode_slice(&[AdStructure::ServiceData16 { uuid: uuid16, data: payload }], &mut buf[used..]).unwrap();
     &buf[..used]

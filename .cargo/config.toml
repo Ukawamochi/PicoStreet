@@ -4,10 +4,12 @@ target = "thumbv6m-none-eabi"
 [target.thumbv6m-none-eabi]
 runner = "probe-rs run --chip RP2040"
 rustflags = [
+  "-C", "linker=rust-lld",
+  "-C", "link-arg=--nmagic",
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
+  # memory.x は cortex-m-rt の link.x から INCLUDE される
 ]
 
 # Alternative runner using UF2 (uncomment if preferred)
 # runner = "elf2uf2-rs -d"
-

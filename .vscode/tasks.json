@@ -4,11 +4,15 @@
     {
       "label": "cargo build (thumbv6m)",
       "type": "shell",
-      "command": "cargo build",
+      "command": "cargo build --target thumbv6m-none-eabi",
       "options": {
         "env": {
-          "RUSTFLAGS": ""
+          "DEFMT_LOG": "info"
         }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
       },
       "problemMatcher": ["$rustc"]
     }

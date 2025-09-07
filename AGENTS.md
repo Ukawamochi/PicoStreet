@@ -5,6 +5,42 @@
 - 設定: `.cargo/config.toml` でターゲット `thumbv6m-none-eabi` とリンカ引数（`link.x`/`defmt.x`）を指定。メモリレイアウトは `memory.x`。
 - パッケージ: 単一バイナリ `main`（`Cargo.toml`）。成果物は `target/`。CYW43 の FW/CLM は `cyw43-firmware/` に配置。
 
+## defmt ログ設定
+### 環境変数設定
+- **ログレベル制御**: `DEFMT_LOG=info` （`trace`, `debug`, `info`, `warn`, `error` から選択）
+- **設定場所**: 
+  - `.vscode/tasks.json` の `env` セクション: ビルド時のログレベル指定
+  - `.vscode/launch.json` の `env` セクション: デバッグ実行時のログレベル指定
+  
+### VSCode 設定例
+```json
+// .vscode/tasks.json
+{
+  "label": "cargo build (thumbv6m)",
+  "options": {
+    "env": {
+      "DEFMT_LOG": "info"  // trace は詳細すぎるため info 推奨
+    }
+  }
+}
+
+// .vscode/launch.json  
+{
+  "env": {
+    "DEFMT_LOG": "info"
+  },
+  "coreConfigs": [{
+    "rttEnabled": true,
+    "rttChannelFormats": [{"dataFormat": "Defmt"}]
+  }]
+}
+```
+
+### トラブルシューティング
+- **ログが表示されない**: 環境変数 `DEFMT_LOG` の設定とRTT設定を確認
+- **ログが多すぎる**: `trace` → `info` に変更して重要な情報のみ表示
+- **フラッシュエラー**: `programBinary` パスとメモリ設定を確認
+
 ## ビルド・書き込み・開発コマンド
 - 事前準備: `rustup target add thumbv6m-none-eabi`。ツール: `cargo install elf2uf2-rs`、必要に応じて `cargo install cargo-flash`。Linux 権限は `for-linux.md` 参照。
 - ビルド: `cargo build`（または `cargo build --release`）。

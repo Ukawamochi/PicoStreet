@@ -7,7 +7,6 @@
       "name": "Debug Pico W (probe-rs)",
       "chip": "RP2040",
       "cwd": "${workspaceFolder}",
-      "programBinary": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/main",
       "flashingConfig": {
         "flashingEnabled": true,
         "haltAfterReset": true
@@ -15,17 +14,22 @@
       "coreConfigs": [
         {
           "coreIndex": 0,
-          "rttEnabled": true,
-          "rttChannels": [
-            { "channelNumber": 0, "name": "defmt", "format": "Defmt" }
-          ],
           "programBinary": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/main",
-          "rttTimeout": 5000
+          "rttEnabled": true,
+          "rttChannelFormats": [
+            {
+              "channelNumber": 0,
+              "dataFormat": "Defmt",
+              "showLocation": true
+            }
+          ]
         }
       ],
       "connectUnderReset": false,
       "preLaunchTask": "cargo build (thumbv6m)",
-      "env": {}
+      "env": {
+        "DEFMT_LOG": "info"
+      }
     }
   ]
 }
