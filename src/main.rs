@@ -14,6 +14,8 @@ use {defmt_rtt as _, embassy_time as _, panic_probe as _};
 //BLEとLEDを別モジュールで制御
 mod ble;
 mod leds;
+use pico_w_id_beacon::device_id;
+use pico_w_id_beacon::format::fmt_bytes_colon;
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
@@ -28,7 +30,7 @@ async fn cyw43_task(
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Booting Pico W ID beacon PoC");
+    info!("Booting PicoStreet X交換 キーホルダー");
 
     let p = embassy_rp::init(Default::default());
 
@@ -67,7 +69,15 @@ async fn main(spawner: Spawner) {
     // 初期状態の内蔵LED消灯
     control.gpio_set(0, false).await;
     info!("CYW43 initialized");
-    embassy_time::Timer::after_millis(100).await;
+    
+    // Bluetooth初期化完了を待つ（BTファームウェア読み込み完了まで）
+    info!("Waiting for Bluetooth initialization to complete...");
+    embassy_time::Timer::after_millis(1000).await;
+
+    // 自デバイス BD_ADDR 取得
+    let self_bd_addr = device_id::get_bd_addr(&mut control).await;
+    let bd_str = fmt_bytes_colon(&self_bd_addr);
+    info!("SELF bd_addr={}", bd_str.as_str());
 
     // GPIO18 外付け LED 初期化
     let mut rx_led = Output::new(p.PIN_18, Level::Low);
@@ -87,5 +97,5 @@ async fn main(spawner: Spawner) {
     info!("BLE host/controller wired");
 
     // 時分割ループ開始（広告→スキャン）
-    ble::advertise_and_scan_loop(controller, &mut control, &mut rx_led).await;
+    ble::advertise_and_scan_loop(controller, &mut control, &mut rx_led, self_bd_addr).await;
 }

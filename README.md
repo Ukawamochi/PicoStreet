@@ -2,8 +2,8 @@ Pico W ID ビーコン PoC
 
 Raspberry Pi Pico W 上で BLE アドバタイズ Service Data に TLV 形式の ID を載せて送信し、周囲の同形式アドバタイズを受信検知して LED を点滅させる PoC です。
 
-- 送信: Pico W が拡張可能な TLV フレームを Service Data(AD type 0x16) に載せて常時発信。送信フェーズ開始時に内蔵 LED (WL_GPIO0) を 100ms 点灯。
-- 受信: 周囲の Pico W が送る同形式のアドバタイズをスキャンし、検出毎に GPIO18 の LED を 120ms 点灯。
+- TX: Pico W が拡張可能な TLV フレームを Service Data(AD type 0x16) に載せて常時発信。TXフェーズ開始時に内蔵 LED (WL_GPIO0) を点灯。
+- RX: 周囲の Pico W が送る同形式のアドバタイズをスキャンし、検出毎に GPIO18 の LED を 120ms 点灯。
 - プロトコル: Service Data 内に ver(1), type(1), flags(1), rsv(1), TLVs...。必須 TLV は T=0x01 CONTACT_ID(16B)。
 
 構成
@@ -14,8 +14,8 @@ Raspberry Pi Pico W 上で BLE アドバタイズ Service Data に TLV 形式の
 - ログ: defmt-rtt, パニック: panic-probe
 
 配線
-- 受信用 LED: GPIO18 -> 抵抗(330Ω程度) -> LED -> GND
-- 送信用 LED: 内蔵 LED（CYW43 側 WL_GPIO0）を使用（配線不要）
+- RX用 LED: GPIO18 -> 抵抗(330Ω程度) -> LED -> GND
+- TX用 LED: 内蔵 LED（CYW43 側 WL_GPIO0）を使用（配線不要）
 
 ビルド前準備
 - Rust ターゲット: `rustup target add thumbv6m-none-eabi`
@@ -39,9 +39,9 @@ CYW43 ファームウェア配置
 - probe-rs 経由で実行: `cargo run --release`（.cargo/config.toml の runner を使用）
 
 動作
-- 1秒間の広告 → 1.5秒間のスキャンを繰り返します。
-- 広告開始時: WL_GPIO0 が 100ms 点灯
-- 受信検知時: GPIO18 の LED が 120ms 点灯
+- TXフェーズ（5秒） → RXフェーズ（10秒）を繰り返します。
+- TXフェーズ時: WL_GPIO0 が点灯
+- RX検知時: GPIO18 の LED が 120ms 点滅
 - defmt::info! で受信した CONTACT_ID を 16バイト HEX で表示
 
 コード配置
@@ -65,7 +65,7 @@ CYW43 ファームウェア配置
 - コメント・ドキュメントは日本語
 
 既知の注意点
-- 広告/スキャンは時間多重（同時動作はコントローラ実装依存のため未使用）
-- イベントハンドラは非同期不可のため、受信を原子的カウンタに積み、タスク側で点滅処理
+- TX/RXは時分割多重（同時動作はコントローラ実装依存のため未使用）
+- イベントハンドラは非同期不可のため、RXを原子的カウンタに積み、タスク側で点滅処理
 - CONTACT_ID の 16バイト制約のため、例示 ID を 16B に調整しています
 

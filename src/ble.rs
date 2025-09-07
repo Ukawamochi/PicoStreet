@@ -12,22 +12,29 @@ use trouble_host::advertise::{AdStructure, Advertisement, AdvertisementParameter
 use trouble_host::prelude::*;
 
 use pico_w_id_beacon::adv_payload::{build_adv_payload, parse_service_data};
+use pico_w_id_beacon::format::fmt_bytes_colon;
 use pico_w_id_beacon::constants::SERVICE_UUID_16;
 
 static RX_PULSES: AtomicU8 = AtomicU8::new(0);
 
-struct RxHandler;
+struct RxHandler {
+    self_bd_addr: [u8; 6],
+}
 
 impl EventHandler for RxHandler {
     fn on_adv_reports(&self, mut it: trouble_host::scan::LeAdvReportsIter<'_>) {
         while let Some(Ok(report)) = it.next() {
             let data = report.data;
-            // Service Data の中身を検査
-            // ここでは AD 全体のパーサを使いたいので、
-            // report.data をそのまま渡す
             if let Some(parsed) = parse_service_data(data) {
-                info!("RX CONTACT_ID={:x}", &parsed.contact_id);
-                // パルス要求を加算
+                // 自分自身のBD_ADDRの場合は「SELF RX」としてログする（LEDは点滅させない）
+                if parsed.bd_addr == self.self_bd_addr {
+                    let s = fmt_bytes_colon(&parsed.bd_addr);
+                    info!("SELF RX bd_addr={} rssi={}", s.as_str(), report.rssi);
+                    continue;
+                }
+                
+                let s = fmt_bytes_colon(&parsed.bd_addr);
+                info!("RECV bd_addr={} rssi={}", s.as_str(), report.rssi);
                 let v = RX_PULSES.load(Ordering::Relaxed);
                 RX_PULSES.store(v.saturating_add(1), Ordering::Relaxed);
             }
@@ -38,7 +45,15 @@ impl EventHandler for RxHandler {
         while let Some(Ok(report)) = it.next() {
             let data = report.data;
             if let Some(parsed) = parse_service_data(data) {
-                info!("RX(ext) CONTACT_ID={:x}", &parsed.contact_id);
+                // 自分自身のBD_ADDRの場合は「SELF RX」としてログする（LEDは点滅させない）
+                if parsed.bd_addr == self.self_bd_addr {
+                    let s = fmt_bytes_colon(&parsed.bd_addr);
+                    info!("SELF RX bd_addr={} rssi={}", s.as_str(), report.rssi);
+                    continue;
+                }
+                
+                let s = fmt_bytes_colon(&parsed.bd_addr);
+                info!("RECV(ext) bd_addr={} rssi={}", s.as_str(), report.rssi);
                 let v = RX_PULSES.load(Ordering::Relaxed);
                 RX_PULSES.store(v.saturating_add(1), Ordering::Relaxed);
             }
@@ -60,13 +75,14 @@ fn build_advertisement_data<'a>(buf: &'a mut [u8], payload: &'a [u8]) -> &'a [u8
     &buf[..used]
 }
 
-/// BLE Host を生成し、1秒広告 → 1.5秒スキャンを繰り返す。
-/// - 広告: Service Data に TLV フレームを格納
-/// - スキャン: 見つかったら RX LED を点滅
+/// BLE Host を生成し、TXフェーズ → RXフェーズを繰り返す。
+/// - TXフェーズ: Service Data に簡素化PicoStreetペイロードを格納して広告
+/// - RXフェーズ: スキャンして見つかったら RX LED を点滅
 pub async fn advertise_and_scan_loop<C>(
     controller: C,
     control: &mut cyw43::Control<'_>,
     rx_led: &mut Output<'_>,
+    self_bd_addr: [u8; 6],
 ) -> !
 where
     C: Controller
@@ -85,18 +101,20 @@ where
 
     let Host { mut peripheral, central, mut runner, .. } = stack.build();
     let mut scanner = Scanner::new(central);
-    let handler = RxHandler;
+    let handler = RxHandler { self_bd_addr };
 
     // バッファ
-    let mut adv_payload = [0u8; 31];
-    let payload_len = build_adv_payload(&mut adv_payload);
+    let mut adv_payload = [0u8; 8];
+    let payload_len = build_adv_payload(&mut adv_payload, &self_bd_addr);
     let payload = &adv_payload[..payload_len];
-    info!("Built TX payload len={} CONTACT_ID={:x}", payload_len, &pico_w_id_beacon::constants::CONTACT_ID);
+    let bd_str = fmt_bytes_colon(&self_bd_addr);
+    info!("Built TX payload len={} bd_addr={}", payload_len, bd_str.as_str());
     let mut ad_buf = [0u8; 31];
 
     let _ = join(runner.run_with_handler(&handler), async {
+        // ジッタは入れない（将来的に並列化予定のため、明示的に削除）
         loop {
-            // 送信フェーズ（1秒）: フェーズ中は内蔵LEDを点灯
+            // TXフェーズ: 内蔵LEDを点灯して広告送信
             info!("TX phase start");
             control.gpio_set(0, true).await;
             let ad = build_advertisement_data(&mut ad_buf, payload);
@@ -112,13 +130,13 @@ where
                 )
                 .await
                 .unwrap();
-            Timer::after(Duration::from_millis(1000)).await;
+            // TX フェーズ時間: 5秒
+            Timer::after(Duration::from_millis(5000)).await;
             drop(_advertiser);
-            info!("TX phase end");
             control.gpio_set(0, false).await;
 
-            // 受信フェーズ（1.5秒）
-            info!("Scan phase start");
+            // RXフェーズ: スキャンして他デバイスを検出
+            info!("RX phase start");
             let mut cfg = ScanConfig::default();
             cfg.active = false; // passive
             cfg.interval = Duration::from_millis(200);
@@ -127,7 +145,8 @@ where
             let _session = scanner.scan(&cfg).await.unwrap();
 
             let start = embassy_time::Instant::now();
-            while embassy_time::Instant::now() - start < Duration::from_millis(1500) {
+            // RX フェーズ時間: 10秒
+            while embassy_time::Instant::now() - start < Duration::from_millis(10_000) {
                 // パルスがあれば点滅
                 if RX_PULSES.load(Ordering::Relaxed) > 0 {
                     let v = RX_PULSES.load(Ordering::Relaxed);
@@ -140,7 +159,6 @@ where
             }
             // _session drop -> scan 停止
             core::mem::drop(_session);
-            info!("Scan phase end");
         }
     }).await;
 
