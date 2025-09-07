@@ -1,32 +1,31 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-      {
-        "preLaunchTask": "build",
-        "type": "probe-rs-debug",
-        "request": "launch",
-        "name": "Debug RP2040",
-        "cwd": "${workspaceFolder}",
-        "chip": "RP2040",
-        "connectUnderReset": false,
-        "speed": 20000,
-        "flashingConfig": {
-          "flashingEnabled": true,
-          "haltAfterReset": false
-        },
-        "coreConfigs": [
-          {
-            "programBinary": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/main",
-            "rttEnabled": true,
-            "rttChannelFormats": [
-              {
-                "channelNumber": 0,
-                "dataFormat": "Defmt",
-                "showLocation": true
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  }
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "name": "Debug Pico W (probe-rs)",
+      "chip": "RP2040",
+      "cwd": "${workspaceFolder}",
+      "programBinary": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/main",
+      "flashingConfig": {
+        "flashingEnabled": true,
+        "haltAfterReset": true
+      },
+      "coreConfigs": [
+        {
+          "coreIndex": 0,
+          "rttEnabled": true,
+          "rttChannels": [
+            { "channelNumber": 0, "name": "defmt", "format": "Defmt" }
+          ],
+          "programBinary": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/main",
+          "rttTimeout": 5000
+        }
+      ],
+      "connectUnderReset": false,
+      "preLaunchTask": "cargo build (thumbv6m)",
+      "env": {}
+    }
+  ]
+}

@@ -1,20 +1,17 @@
 {
-    "version": "2.0.0",
-    "tasks": [
+  "version": "2.0.0",
+  "tasks": [
     {
-        "label": "build",
-        "type": "shell",
-        "command": "cargo build --target thumbv6m-none-eabi",
-        "options": {
-            "env": {
-                "DEFMT_LOG": "trace"
-            }
-        },
-        "group": {
-            "kind": "build",
-            "isDefault": true
-        },
-        "problemMatcher": ["$rustc"]
+      "label": "cargo build (thumbv6m)",
+      "type": "shell",
+      "command": "cargo build",
+      "options": {
+        "env": {
+          "RUSTFLAGS": ""
+        }
+      },
+      "problemMatcher": ["$rustc"]
     }
-    ]
+  ]
 }
+

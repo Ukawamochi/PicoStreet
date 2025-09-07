@@ -4,6 +4,7 @@
 
 - 43439A0.bin
 - 43439A0_clm.bin
+- 43439A0_btfw.bin
 
 入手元（Embassy リポジトリ内）:
 - https://github.com/embassy-rs/embassy/tree/main/cyw43-firmware
@@ -14,11 +15,13 @@
 配置後のパス例:
 - `cyw43-firmware/43439A0.bin`
 - `cyw43-firmware/43439A0_clm.bin`
+- `cyw43-firmware/43439A0_btfw.bin`
 
 注意:
 - ファイルが存在しない場合、`src/main.rs` の `include_bytes!` によりビルドエラーになります。
-- 取得スクリプト例（自己責任で使用）:
+- 取得スクリプト例
   ```bash
   curl -LO https://raw.githubusercontent.com/embassy-rs/embassy/main/cyw43-firmware/43439A0.bin
   curl -LO https://raw.githubusercontent.com/embassy-rs/embassy/main/cyw43-firmware/43439A0_clm.bin
+  curl -LO https://raw.githubusercontent.com/embassy-rs/embassy/main/cyw43-firmware/43439A0_btfw.bin
   ```

@@ -1,42 +1,51 @@
 [package]
-name = "rp-rust-starter"
+name = "pico-w-id-beacon"
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
+autobins = false
+
+[dependencies]
+# Embassy core
+embassy-executor = { version = "0.9.1", default-features = false, features = ["arch-cortex-m", "executor-thread", "executor-interrupt"] }
+embassy-time = { version = "0.5.0", default-features = false, features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-rp = { version = "0.8.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-futures = "0.1.2"
+embassy-sync = { version = "0.7", features = ["defmt"] }
+
+# CYW43 (Pico W WiFi/BT)
+cyw43 = { version = "0.5.0", features = ["defmt", "firmware-logs", "bluetooth"] }
+cyw43-pio = { version = "0.8.0", features = ["defmt"] }
+
+# BLE Host (TrouBLE)
+trouble-host = { git = "https://github.com/embassy-rs/trouble", default-features = true, features = ["scan", "defmt"] }
+bt-hci = { version = "0.4" }
+
+# Logging / panic
+defmt = "1.0.0"
+defmt-rtt = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+
+# Cortex-M runtime
+cortex-m = { version = "0.7.6" }
+cortex-m-rt = "0.7.0"
+static_cell = "2.1.0"
+portable-atomic = { version = "1.7", features = ["critical-section"] }
+heapless = "0.9"
+
+[dev-dependencies]
+# For host-side unit tests of adv_payload
+pretty_assertions = "1.4"
+
+[features]
+# Optionally allow building without bundling firmware (for compile-checks on CI)
+skip-cyw43-firmware = []
+
+[profile.release]
+debug = 2
+lto = true
+codegen-units = 1
 
 [[bin]]
 name = "main"
 path = "src/main.rs"
-test = false
-
-[dependencies]
-# Cortex-M ランタイム/低レベル
-cortex-m = { version = "0.7.6" }
-cortex-m-rt = { version = "0.7.3" }
-critical-section = "1.1"
-
-# ログ/パニック/フォーマッタ
-defmt = "1.0.1"
-defmt-rtt = "1.0.0"
-panic-probe = { version = "0.3.2", features = ["print-defmt"] }
-
-# Embassy 実行環境/時間/ボード(HAL)
-embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
-embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-rp = { version = "0.8.0", features = ["defmt", "time-driver", "critical-section-impl", "rp2040", "boot2-generic-03h"] }
-
-# Pico W のWi‑Fi/LED制御（CYW43）
-# 注：ログを抑制したい場合は "defmt", "firmware-logs" を削除
-cyw43 = { version = "0.5.0", features = [] }  # defmt, firmware-logs を一時的に無効化
-cyw43-pio = { version = "0.8.0", features = [] }  # defmt を一時的に無効化
-
-# ユーティリティ
-heapless = "0.8.0"
-static_cell = "2.1"
-embedded-hal = "1.0"
-embedded-hal-async = "1.0"
-embedded-io-async = "0.6"
-fugit = "0.3.7"
-portable-atomic = { version = "1.10", features = ["unsafe-assume-single-core"] }
-
-# RP2040 ブートローダ（BOOT2 セクションを提供）
-rp2040-boot2 = "0.3"

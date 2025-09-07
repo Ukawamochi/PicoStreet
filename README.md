@@ -1,55 +1,71 @@
-# Raspberry Pi Pico W 用 Rust スターター
+Pico W ID ビーコン PoC
 
-このリポジトリは Raspberry Pi Pico W 専用の Rust スターターです。無印（非 W）Pico との互換性は考慮しません。実装は Embassy ベース（非同期）で、Pico W 内蔵 LED を CYW43 ドライバ経由で点滅させます。
+Raspberry Pi Pico W 上で BLE アドバタイズ Service Data に TLV 形式の ID を載せて送信し、周囲の同形式アドバタイズを受信検知して LED を点滅させる PoC です。
 
-## 特徴
-- `defmt`/`defmt-rtt` による軽量ロギング対応。
-- probe-rs によるデバッグ/書き込み対応（`cargo flash` 等）。
-- 最小構成で L チカから開始可能。
+- 送信: Pico W が拡張可能な TLV フレームを Service Data(AD type 0x16) に載せて常時発信。送信フェーズ開始時に内蔵 LED (WL_GPIO0) を 100ms 点灯。
+- 受信: 周囲の Pico W が送る同形式のアドバタイズをスキャンし、検出毎に GPIO18 の LED を 120ms 点灯。
+- プロトコル: Service Data 内に ver(1), type(1), flags(1), rsv(1), TLVs...。必須 TLV は T=0x01 CONTACT_ID(16B)。
 
-## 前提条件
-- ターゲット追加: `rustup target add thumbv6m-none-eabi`
-- ツール（任意含む）:
-  - UF2 生成: `cargo install elf2uf2-rs`
-  - プローブ書き込み: `cargo install cargo-flash`
-- Linux での USB 権限は `for-linux.md` を参照。
+構成
+- Rust/Embassy（no_std/no_main）
+- embassy-executor, embassy-rp, embassy-time
+- cyw43, cyw43-pio, cyw43-firmware（FW/CLM/BTFW）
+- BLE Host: trouble-host
+- ログ: defmt-rtt, パニック: panic-probe
 
-## ファームウェアの配置（重要）
-Pico W の内蔵 LED を制御するには CYW43 のファームウェア（FW/CLM）が必要です。以下2ファイルをリポジトリ直下の `cyw43-firmware/` に配置してください。
+配線
+- 受信用 LED: GPIO18 -> 抵抗(330Ω程度) -> LED -> GND
+- 送信用 LED: 内蔵 LED（CYW43 側 WL_GPIO0）を使用（配線不要）
 
+ビルド前準備
+- Rust ターゲット: `rustup target add thumbv6m-none-eabi`
+- ツール
+  - UF2 変換: `cargo install elf2uf2-rs`
+  - あるいは書込: `cargo install cargo-flash`
+- Linux の udev 権限設定は probe-rs の手順を参照
+
+CYW43 ファームウェア配置
+本リポジトリの `cyw43-firmware/` 配下に以下 3 ファイルを配置してください（既に同梱済み）。
 - 43439A0.bin
 - 43439A0_clm.bin
+- 43439A0_btfw.bin
+注: CI 等でファームなしでのビルド確認をしたい場合は Cargo の `skip-cyw43-firmware` フィーチャを有効化してください。
 
-入手先（Embassy リポジトリ）: https://github.com/embassy-rs/embassy/tree/main/cyw43-firmware
+ビルド・書き込み
+- デバッグビルド: `cargo build`
+- リリースビルド: `cargo build --release`
+- UF2 変換（デバッグ）: `elf2uf2-rs target/thumbv6m-none-eabi/debug/pico-w-id-beacon`
+- 書き込み（UF2）: BOOTSEL で RPI-RP2 をマウントし、.uf2 をコピー
+- probe-rs 経由で実行: `cargo run --release`（.cargo/config.toml の runner を使用）
 
-配置例:
-```
-cyw43-firmware/43439A0.bin
-cyw43-firmware/43439A0_clm.bin
-```
+動作
+- 1秒間の広告 → 1.5秒間のスキャンを繰り返します。
+- 広告開始時: WL_GPIO0 が 100ms 点灯
+- 受信検知時: GPIO18 の LED が 120ms 点灯
+- defmt::info! で受信した CONTACT_ID を 16バイト HEX で表示
 
-## ビルドと書き込み
-```bash
-cargo build               # デバッグビルド
-cargo build --release     # リリースビルド
+コード配置
+- src/main.rs … RP2040/CYW43 初期化、Runner タスク spawn、LED/Host 準備、タイムスライス制御
+- src/ble.rs … Trouble Host の生成、広告/スキャンユーティリティ、イベントハンドラ
+- src/leds.rs … WL_GPIO0 と GPIO18 の点滅ヘルパ
+- src/adv_payload.rs … TLV 定義・ビルダ/パーサ（ユニットテスト付き）
+- src/lib.rs … 共通定数
 
-# UF2 生成（デバッグビルドの例）
-elf2uf2-rs target/thumbv6m-none-eabi/debug/main
+プロトコル仕様（抜粋）
+- Service UUID: 0xF00D
+- フレーム: ver(=0x01), type(=0x01), flags(0x00), rsv(0x00), TLVs...
+- 必須 TLV: T=0x01 CONTACT_ID (16B)
+- 初期 CONTACT_ID: DEMO-DEMO-DEMO-1（16B）
 
-# BOOTSEL で RPI-RP2 ドライブへ .uf2 をコピー
+テスト
+純粋ロジックはホスト側で `cargo test` 可能です（adv_payload.rs）。
 
-# プローブ利用の例（任意）
-cargo flash --chip RP2040 --release
-```
+コーディング規約
+- cargo fmt --all と cargo clippy -D warnings を推奨
+- コメント・ドキュメントは日本語
 
-## ログ（defmt/RTT）
-- `cargo-embed` あるいは probe-rs RTT ビューアで `defmt::println!` 出力を確認できます。
+既知の注意点
+- 広告/スキャンは時間多重（同時動作はコントローラ実装依存のため未使用）
+- イベントハンドラは非同期不可のため、受信を原子的カウンタに積み、タスク側で点滅処理
+- CONTACT_ID の 16バイト制約のため、例示 ID を 16B に調整しています
 
-## 注意（Pico W の LED について）
-- Pico W の内蔵 LED は Wi‑Fi モジュール（CYW43）経由で制御されるため、そのままでは点灯しません。
-- 内蔵 LED を使う場合は `cyw43` ドライバ等の導入とコード変更が必要です（無印向けの互換対応は行いません）。
-
-## 構成
-- エントリポイント: `src/main.rs`（`no_std`/`no_main`）
-- ターゲット/リンカ設定: `.cargo/config.toml`、`memory.x`
-- 依存関係: `Cargo.toml`
