@@ -1,6 +1,5 @@
-Pico W ID ビーコン PoC
+PicoStreet PoC
 
-Raspberry Pi Pico W 上で BLE アドバタイズ Service Data に TLV 形式の ID を載せて送信し、周囲の同形式アドバタイズを受信検知して LED を点滅させる PoC です。
 
 - TX: Pico W が拡張可能な TLV フレームを Service Data(AD type 0x16) に載せて常時発信。TXフェーズ開始時に内蔵 LED (WL_GPIO0) を点灯。
 - RX: 周囲の Pico W が送る同形式のアドバタイズをスキャンし、検出毎に GPIO18 の LED を 120ms 点灯。
@@ -34,11 +33,16 @@ CYW43 ファームウェア配置
 ビルド・書き込み
 - デバッグビルド: `cargo build`
 - リリースビルド: `cargo build --release`
+
+（未検証）
 - UF2 変換（デバッグ）: `elf2uf2-rs target/thumbv6m-none-eabi/debug/pico-w-id-beacon`
+（未検証）
+
+
 - 書き込み（UF2）: BOOTSEL で RPI-RP2 をマウントし、.uf2 をコピー
 - probe-rs 経由で実行: `cargo run --release`（.cargo/config.toml の runner を使用）
 
-動作
+動作（並列化実装予定）
 - TXフェーズ（5秒） → RXフェーズ（10秒）を繰り返します。
 - TXフェーズ時: WL_GPIO0 が点灯
 - RX検知時: GPIO18 の LED が 120ms 点滅
