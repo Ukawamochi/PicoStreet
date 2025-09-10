@@ -25,3 +25,4 @@
   curl -LO https://raw.githubusercontent.com/embassy-rs/embassy/main/cyw43-firmware/43439A0_clm.bin
   curl -LO https://raw.githubusercontent.com/embassy-rs/embassy/main/cyw43-firmware/43439A0_btfw.bin
   ```
+
