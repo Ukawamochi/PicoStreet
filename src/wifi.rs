@@ -145,10 +145,14 @@ async fn net_connectivity_test(
         .map_err(|_| "ネットワークタスク起動失敗")
         .ok();
 
-    // Wait for IP config
-    stack
-        .wait_config_up()
-        .await;
+    // IP取得待ち（タイムアウト付きでブロック回避）
+    use embassy_time::{with_timeout, Duration};
+    if with_timeout(Duration::from_secs(10), stack.wait_config_up())
+        .await
+        .is_err()
+    {
+        return Err("DHCPタイムアウト");
+    }
 
     let config = stack.config_v4().ok_or("IPv4設定取得失敗")?;
     info!("IPv4アドレス取得: {}", defmt::Debug2Format(&config.address));
@@ -166,30 +170,39 @@ async fn net_connectivity_test(
     let mut socket = TcpSocket::new(stack, &mut rx_buf, &mut tx_buf);
 
     info!("TCP接続試行: {:?}", defmt::Debug2Format(&ep));
-    socket
-        .connect(ep)
+    if with_timeout(Duration::from_secs(3), socket.connect(ep))
         .await
-        .map_err(|_| "TCP接続失敗")?;
+        .map_err(|_| "TCP接続タイムアウト")?
+        .is_err()
+    {
+        return Err("TCP接続失敗");
+    }
 
     let req = b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nUser-Agent: PicoStreet/0.1\r\n\r\n";
-    socket
-        .write_all(req)
+    if with_timeout(Duration::from_secs(2), socket.write_all(req))
         .await
-        .map_err(|_| "HTTP送信失敗")?;
+        .map_err(|_| "HTTP送信タイムアウト")?
+        .is_err()
+    {
+        return Err("HTTP送信失敗");
+    }
 
     // Read some bytes
     let mut total = 0usize;
     let mut buf = [0u8; 256];
     loop {
-        match socket.read(&mut buf).await {
-            Ok(0) => break, // closed
-            Ok(n) => {
+        match with_timeout(Duration::from_secs(2), socket.read(&mut buf)).await {
+            Ok(Ok(0)) => break, // closed
+            Ok(Ok(n)) => {
                 total += n;
                 if total > 64 { break; }
             }
-            Err(_) => return Err("HTTP受信失敗"),
+            Ok(Err(_)) => return Err("HTTP受信失敗"),
+            Err(_) => break, // タイムアウト: データが来ないが接続できたのでOK
         }
     }
+    // 明示的にクローズしてソケットを解放
+    socket.close();
     info!("HTTP GET応答受信: {}バイト", total);
     Ok(())
 }
