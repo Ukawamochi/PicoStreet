@@ -28,12 +28,12 @@ impl EventHandler for RxHandler {
                 // 自分自身のBD_ADDRの場合は「SELF RX」としてログする（LEDは点滅させない）
                 if parsed.bd_addr == self.self_bd_addr {
                     let s = fmt_bytes_colon(&parsed.bd_addr);
-                    info!("SELF RX bd_addr={} rssi={}", s.as_str(), report.rssi);
+                    info!("自分の信号受信 bd_addr={} rssi={}", s.as_str(), report.rssi);
                     continue;
                 }
                 
                 let s = fmt_bytes_colon(&parsed.bd_addr);
-                info!("RECV bd_addr={} rssi={}", s.as_str(), report.rssi);
+                info!("他デバイス検出 bd_addr={} rssi={}", s.as_str(), report.rssi);
                 let v = RX_PULSES.load(Ordering::Relaxed);
                 RX_PULSES.store(v.saturating_add(1), Ordering::Relaxed);
             }
@@ -47,12 +47,12 @@ impl EventHandler for RxHandler {
                 // 自分自身のBD_ADDRの場合は「SELF RX」としてログする（LEDは点滅させない）
                 if parsed.bd_addr == self.self_bd_addr {
                     let s = fmt_bytes_colon(&parsed.bd_addr);
-                    info!("SELF RX bd_addr={} rssi={}", s.as_str(), report.rssi);
+                    info!("自分の信号受信(拡張) bd_addr={} rssi={}", s.as_str(), report.rssi);
                     continue;
                 }
                 
                 let s = fmt_bytes_colon(&parsed.bd_addr);
-                info!("RECV(ext) bd_addr={} rssi={}", s.as_str(), report.rssi);
+                info!("他デバイス検出(拡張) bd_addr={} rssi={}", s.as_str(), report.rssi);
                 let v = RX_PULSES.load(Ordering::Relaxed);
                 RX_PULSES.store(v.saturating_add(1), Ordering::Relaxed);
             }
@@ -91,7 +91,7 @@ where
 {
     // ランダムアドレス（PoC固定値）
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
-    info!("BLE address = {:?}", address);
+    info!("BLEアドレス = {:?}", address);
 
     // Host 準備
     let mut resources: HostResources<DefaultPacketPool, 1, 1> = HostResources::new();
@@ -106,13 +106,13 @@ where
     let payload_len = build_adv_payload(&mut adv_payload, &self_bd_addr);
     let payload = &adv_payload[..payload_len];
     let bd_str = fmt_bytes_colon(&self_bd_addr);
-    info!("Built TX payload len={} bd_addr={}", payload_len, bd_str.as_str());
+    info!("送信ペイロード構築 len={} bd_addr={}", payload_len, bd_str.as_str());
     let mut ad_buf = [0u8; 31];
 
     let _ = join(runner.run_with_handler(&handler), async {
         // 広告をEnable維持
         let ad = build_advertisement_data(&mut ad_buf, payload);
-        info!("Enable advertising len={}", ad.len());
+        info!("BLE送信開始 len={}", ad.len());
         let mut params = AdvertisementParameters::default();
         params.interval_min = Duration::from_millis(1200);
         params.interval_max = Duration::from_millis(1500);

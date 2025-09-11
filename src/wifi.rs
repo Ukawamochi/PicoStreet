@@ -1,9 +1,9 @@
 //! WiFi connection and simple connectivity test using CYW43 + Embassy.
 //!
 //! Notes
-//! - Network stack usage is behind the `wifi` feature to keep default builds
-//!   unchanged. Enable with `--features wifi` when you are ready.
+//! - WiFi functionality is always enabled in this version
 //! - LED patterns indicate connection state as requested.
+//! - Includes full network stack with TCP/IP, DHCP, and HTTP connectivity test
 
 use defmt::*;
 use embassy_time::{Timer, Duration, Instant};
@@ -53,7 +53,7 @@ pub async fn led_test_success(control: &mut cyw43::Control<'_>) {
 /// - Shows status via LED patterns
 /// - Logs stages with `info!()`
 /// - Measures and logs connection duration
-/// - Optionally runs a HTTP GET against example.com (feature `wifi`)
+/// - Runs a HTTP GET against example.com for connectivity test
 pub async fn connect_and_test(
     spawner: embassy_executor::Spawner,
     mut control: &mut cyw43::Control<'_>,
@@ -61,7 +61,7 @@ pub async fn connect_and_test(
 ) {
     use pico_w_id_beacon::wifi_config::{WIFI_PSK, WIFI_SSID};
 
-    info!("WiFi: starting connection to SSID='{}'", WIFI_SSID);
+    info!("WiFi接続開始: SSID='{}'", WIFI_SSID);
 
     // Power management to save energy once link is up
     control
@@ -81,41 +81,31 @@ pub async fn connect_and_test(
     match join_res {
         Ok(()) => {
             let ms = (Instant::now() - t0).as_millis();
-            info!("WiFi: joined '{}' ({} ms)", WIFI_SSID, ms);
+            info!("WiFi接続成功: '{}' ({}ms)", WIFI_SSID, ms);
             led_connected(&mut control).await;
         }
         Err(e) => {
-            warn!("WiFi: join failed: {:?}", e);
+            warn!("WiFi接続失敗: {}", defmt::Debug2Format(&e));
             led_connect_failed(&mut control).await;
             return;
         }
     }
 
-    // Optional: bring up network stack and test connectivity
-    #[cfg(feature = "wifi")]
-    {
-        if let Err(e) = net_connectivity_test(spawner, net_device).await {
-            warn!("WiFi: connectivity test failed: {:?}", e);
-        } else {
-            info!("WiFi: connectivity test succeeded");
-            led_test_success(&mut control).await;
-        }
-    }
-
-    #[cfg(not(feature = "wifi"))]
-    {
-        info!("WiFi: connectivity test skipped (feature 'wifi' disabled)");
+    // Network stack and connectivity test
+    if let Err(e) = net_connectivity_test(spawner, net_device).await {
+        warn!("WiFi接続テスト失敗: {}", e);
+    } else {
+        info!("WiFi接続テスト成功");
+        led_test_success(&mut control).await;
     }
 }
 
-// ===== Optional network stack and tests (feature `wifi`) =====
-#[cfg(feature = "wifi")]
+// ===== Network stack and connectivity tests =====
 #[embassy_executor::task]
 async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'static>>) -> ! {
     runner.run().await
 }
 
-#[cfg(feature = "wifi")]
 async fn net_connectivity_test(
     spawner: embassy_executor::Spawner,
     net_device: cyw43::NetDriver<'static>,
@@ -127,7 +117,8 @@ async fn net_connectivity_test(
     let config = Config::dhcpv4(Default::default());
 
     // Static resources
-    static RESOURCES: StaticCell<StackResources<2>> = StaticCell::new();
+    // DHCP (1) + DNS (1) + user TCP socket (1) = 3
+    static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
     static STACK: StaticCell<Stack<'static>> = StaticCell::new();
 
     // Random seed (simple fallback)
@@ -151,7 +142,7 @@ async fn net_connectivity_test(
     // by spawning via the global executor.
     spawner
         .spawn(net_task(runner))
-        .map_err(|_| "spawn net_task failed")
+        .map_err(|_| "ネットワークタスク起動失敗")
         .ok();
 
     // Wait for IP config
@@ -159,8 +150,8 @@ async fn net_connectivity_test(
         .wait_config_up()
         .await;
 
-    let config = stack.config_v4().ok_or("no IPv4 config")?;
-    info!("WiFi: got IPv4 {}", defmt::Debug2Format(&config.address));
+    let config = stack.config_v4().ok_or("IPv4設定取得失敗")?;
+    info!("IPv4アドレス取得: {}", defmt::Debug2Format(&config.address));
 
     // Simple HTTP GET test to example.com (fixed IPv4 to avoid DNS here)
     use embassy_net::{IpAddress, IpEndpoint};
@@ -174,17 +165,17 @@ async fn net_connectivity_test(
     let mut tx_buf = [0u8; 1024];
     let mut socket = TcpSocket::new(stack, &mut rx_buf, &mut tx_buf);
 
-    info!("WiFi: TCP connect {:?}", defmt::Debug2Format(&ep));
+    info!("TCP接続試行: {:?}", defmt::Debug2Format(&ep));
     socket
         .connect(ep)
         .await
-        .map_err(|_| "tcp connect failed")?;
+        .map_err(|_| "TCP接続失敗")?;
 
     let req = b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nUser-Agent: PicoStreet/0.1\r\n\r\n";
     socket
         .write_all(req)
         .await
-        .map_err(|_| "tcp write failed")?;
+        .map_err(|_| "HTTP送信失敗")?;
 
     // Read some bytes
     let mut total = 0usize;
@@ -196,9 +187,9 @@ async fn net_connectivity_test(
                 total += n;
                 if total > 64 { break; }
             }
-            Err(_) => return Err("tcp read failed"),
+            Err(_) => return Err("HTTP受信失敗"),
         }
     }
-    info!("WiFi: HTTP GET read {} bytes", total);
+    info!("HTTP GET応答受信: {}バイト", total);
     Ok(())
 }

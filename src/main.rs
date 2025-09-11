@@ -54,7 +54,7 @@ async fn main(spawner: Spawner) {
     let spi = cyw43_pio::PioSpi::new(
         &mut pio.common,
         pio.sm0,
-        cyw43_pio::DEFAULT_CLOCK_DIVIDER,
+        cyw43_pio::DEFAULT_CLOCK_DIVIDER * 2, // クロック分周を2倍にして通信を安定化
         pio.irq0,
         cs,
         p.PIN_24,
@@ -66,19 +66,27 @@ async fn main(spawner: Spawner) {
     let state = STATE.init(cyw43::State::new());
     let (net_device, bt_device, mut control, runner) = cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw).await;
     spawner.spawn(cyw43_task(runner)).unwrap();
+    
+    // CYW43の安定化を待つ
+    embassy_time::Timer::after_millis(100).await;
+    
     control.init(clm).await;
+    
+    // 初期化後の安定化を待つ
+    embassy_time::Timer::after_millis(50).await;
+    
     // 初期状態の内蔵LED消灯
     control.gpio_set(0, false).await;
-    info!("CYW43 initialized");
+    info!("CYW43チップ初期化完了");
     
     // 自デバイス BD_ADDR 取得（取得失敗時はエラーインジケータを繰り返す）
     let self_bd_addr = device_id::get_bd_addr(&mut control).await;
     if self_bd_addr == [0u8; 6] {
-        warn!("Failed to obtain BD_ADDR; entering error blink loop");
+        warn!("BD_ADDR取得失敗: エラー点滅モードに移行");
         leds::error_blink_loop(&mut control).await;
     }
     let bd_str = fmt_bytes_colon(&self_bd_addr);
-    info!("SELF bd_addr={}", bd_str.as_str());
+    info!("自分のBD_ADDR={}", bd_str.as_str());
 
     // 起動確認: 内蔵LEDを短く点滅（3回）
     for _ in 0..3 {
@@ -91,15 +99,12 @@ async fn main(spawner: Spawner) {
     // BLE Host に接続
     let controller: ExternalController<_, 10> = ExternalController::new(bt_device);
 
-    // WiFi接続を開始しつつ、BLE初期化と並行実行
-    // （制御LEDの独占を避けるため、WiFi完了後にBLEのLED制御を開始）
-    info!("Starting WiFi connect while BLE initializes...");
-    let _ = embassy_futures::join::join(
-        wifi::connect_and_test(spawner, &mut control, net_device),
-        async {
-            info!("BLE host/controller wired");
-        },
-    ).await;
+    // まずWiFi接続テストを実行（BLEより優先）
+    info!("WiFi接続テストを開始...");
+    wifi::connect_and_test(spawner, &mut control, net_device).await;
+    
+    info!("WiFiテスト完了、BLE機能を開始...");
+    info!("BLEホスト/コントローラ接続完了");
 
     // 時分割ループ開始（広告→スキャン）
     ble::advertise_and_scan_loop(controller, &mut control, self_bd_addr).await;
