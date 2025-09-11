@@ -99,11 +99,23 @@ async fn main(spawner: Spawner) {
     // BLE Host に接続
     let controller: ExternalController<_, 10> = ExternalController::new(bt_device);
 
-    // まずWiFi接続テストを実行（BLEより優先）
-    info!("WiFi接続テストを開始...");
-    wifi::connect_and_test(spawner, &mut control, net_device).await;
-    
-    info!("WiFiテスト完了、BLE機能を開始...");
+    // まずWiFiへ接続し、DHCP完了後にNTP同期（BLEより優先、ただし短時間で完了）
+    info!("WiFi接続とNTP同期を開始...");
+    let stack = match wifi::maintain_wifi_connection(spawner, &mut control, net_device).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("WiFi初期化に失敗しました: {}", e);
+            // WiFi無しで継続（BLE優先）
+            ble::advertise_and_scan_loop(controller, &mut control, self_bd_addr).await;
+        }
+    };
+
+    // NTP時刻同期（失敗しても続行）
+    if let Err(e) = wifi::sync_ntp_time(stack).await {
+        warn!("NTP同期に失敗: {}", e);
+    }
+
+    info!("WiFi/NTP完了。BLE機能を開始します...");
     info!("BLEホスト/コントローラ接続完了");
 
     // 時分割ループ開始（広告→スキャン）

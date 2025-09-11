@@ -37,116 +37,75 @@ pub async fn led_connect_failed(control: &mut cyw43::Control<'_>) {
     }
 }
 
-/// Blink pattern: connectivity test success (3 short blinks).
-pub async fn led_test_success(control: &mut cyw43::Control<'_>) {
-    for _ in 0..3 {
-        let _ = control.gpio_set(0, true).await;
-        Timer::after(Duration::from_millis(120)).await;
-        let _ = control.gpio_set(0, false).await;
-        Timer::after(Duration::from_millis(120)).await;
-    }
-}
+// /// Blink pattern: connectivity test success (3 short blinks).
+// pub async fn led_test_success(control: &mut cyw43::Control<'_>) {
+//     for _ in 0..3 {
+//         let _ = control.gpio_set(0, true).await;
+//         Timer::after(Duration::from_millis(120)).await;
+//         let _ = control.gpio_set(0, false).await;
+//         Timer::after(Duration::from_millis(120)).await;
+//     }
+// }
 
-/// Connect to WiFi and run a simple connectivity test.
-///
-/// Behavior:
-/// - Shows status via LED patterns
-/// - Logs stages with `info!()`
-/// - Measures and logs connection duration
-/// - Runs a HTTP GET against example.com for connectivity test
-pub async fn connect_and_test(
-    spawner: embassy_executor::Spawner,
-    mut control: &mut cyw43::Control<'_>,
-    net_device: cyw43::NetDriver<'static>,
-) {
-    use pico_w_id_beacon::wifi_config::{WIFI_PSK, WIFI_SSID};
+// ===== Network stack 永続化 + NTP同期（Phase1） =====
 
-    info!("WiFi接続開始: SSID='{}'", WIFI_SSID);
-
-    // Power management to save energy once link is up
-    control
-        .set_power_management(cyw43::PowerManagementMode::PowerSave)
-        .await;
-
-    // Quick visual cue that WiFi connect is in progress.
-    led_connecting(&mut control, 2).await; // ~2 seconds (2 cycles)
-
-    let t0 = Instant::now();
-
-    // Attempt to join AP
-    let join_res = control
-        .join(WIFI_SSID, cyw43::JoinOptions::new(WIFI_PSK.as_bytes()))
-        .await;
-
-    match join_res {
-        Ok(()) => {
-            let ms = (Instant::now() - t0).as_millis();
-            info!("WiFi接続成功: '{}' ({}ms)", WIFI_SSID, ms);
-            led_connected(&mut control).await;
-        }
-        Err(e) => {
-            warn!("WiFi接続失敗: {}", defmt::Debug2Format(&e));
-            led_connect_failed(&mut control).await;
-            return;
-        }
-    }
-
-    // Network stack and connectivity test
-    if let Err(e) = net_connectivity_test(spawner, net_device).await {
-        warn!("WiFi接続テスト失敗: {}", e);
-    } else {
-        info!("WiFi接続テスト成功");
-        led_test_success(&mut control).await;
-    }
-}
-
-// ===== Network stack and connectivity tests =====
 #[embassy_executor::task]
 async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'static>>) -> ! {
     runner.run().await
 }
 
-async fn net_connectivity_test(
+/// WiFiへ接続してネットワークスタックを起動し、`Stack`を返す
+pub async fn maintain_wifi_connection(
     spawner: embassy_executor::Spawner,
+    mut control: &mut cyw43::Control<'_>,
     net_device: cyw43::NetDriver<'static>,
-) -> Result<(), &'static str> {
+) -> Result<embassy_net::Stack<'static>, &'static str> {
+    use pico_w_id_beacon::wifi_config::{WIFI_PSK, WIFI_SSID};
     use embassy_net::{Config, Stack, StackResources};
     use static_cell::StaticCell;
 
-    // Create DHCPv4 config
-    let config = Config::dhcpv4(Default::default());
+    info!("WiFi接続開始: SSID='{}'", WIFI_SSID);
 
-    // Static resources
-    // DHCP (1) + DNS (1) + user TCP socket (1) = 3
-    static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+    control
+        .set_power_management(cyw43::PowerManagementMode::PowerSave)
+        .await;
+
+    led_connecting(&mut control, 2).await;
+
+    let t0 = Instant::now();
+    if let Err(e) = control
+        .join(WIFI_SSID, cyw43::JoinOptions::new(WIFI_PSK.as_bytes()))
+        .await
+    {
+        warn!("WiFi接続失敗: {}", defmt::Debug2Format(&e));
+        led_connect_failed(&mut control).await;
+        return Err("AP接続失敗");
+    }
+
+    let ms = (Instant::now() - t0).as_millis();
+    info!("WiFi接続成功: '{}' ({}ms)", WIFI_SSID, ms);
+    led_connected(&mut control).await;
+
+    // DHCPv4でネットワークスタック起動
+    static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new(); // DHCP(1)+DNS(1)+UDP(1)
     static STACK: StaticCell<Stack<'static>> = StaticCell::new();
-
-    // Random seed (simple fallback)
+    let config = Config::dhcpv4(Default::default());
     let seed = 0x1357_9bdf_2468_abcdu64;
-
-    // Build stack and spawn runner
-    let (stack, runner) = embassy_net::new(
+    let (stack_tmp, runner) = embassy_net::new(
         net_device,
         config,
         RESOURCES.init(StackResources::new()),
         seed,
     );
+    let stack = *STACK.init(stack_tmp);
 
-    // SAFETY: `stack` lives in static cell, fine to keep &'static reference.
-    let stack: Stack<'static> = *STACK.init(stack);
-
-    // Spawn network task
-    // Note: this expects to be called from an Embassy context where spawner is available
-    // but we cannot borrow spawner from here; instead, rely on the executor to spawn a task
-    // with this function from main if desired. For Phase 1, we run inline in this function
-    // by spawning via the global executor.
     spawner
         .spawn(net_task(runner))
         .map_err(|_| "ネットワークタスク起動失敗")
         .ok();
 
-    // IP取得待ち（タイムアウト付きでブロック回避）
-    use embassy_time::{with_timeout, Duration};
+    // DHCP待ち（タイムアウト付き）
+    use embassy_time::with_timeout;
     if with_timeout(Duration::from_secs(10), stack.wait_config_up())
         .await
         .is_err()
@@ -154,55 +113,70 @@ async fn net_connectivity_test(
         return Err("DHCPタイムアウト");
     }
 
-    let config = stack.config_v4().ok_or("IPv4設定取得失敗")?;
-    info!("IPv4アドレス取得: {}", defmt::Debug2Format(&config.address));
-
-    // Simple HTTP GET test to example.com (fixed IPv4 to avoid DNS here)
-    use embassy_net::{IpAddress, IpEndpoint};
-    use embassy_net::tcp::TcpSocket;
-    use embedded_io_async::Write;
-
-    // example.com (93.184.216.34) port 80
-    let ep = IpEndpoint::new(IpAddress::v4(93, 184, 216, 34), 80);
-
-    let mut rx_buf = [0u8; 1024];
-    let mut tx_buf = [0u8; 1024];
-    let mut socket = TcpSocket::new(stack, &mut rx_buf, &mut tx_buf);
-
-    info!("TCP接続試行: {:?}", defmt::Debug2Format(&ep));
-    if with_timeout(Duration::from_secs(3), socket.connect(ep))
-        .await
-        .map_err(|_| "TCP接続タイムアウト")?
-        .is_err()
-    {
-        return Err("TCP接続失敗");
+    if let Some(v4) = stack.config_v4() {
+        info!("IPv4取得成功: {}", defmt::Debug2Format(&v4.address));
     }
 
-    let req = b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nUser-Agent: PicoStreet/0.1\r\n\r\n";
-    if with_timeout(Duration::from_secs(2), socket.write_all(req))
-        .await
-        .map_err(|_| "HTTP送信タイムアウト")?
-        .is_err()
-    {
-        return Err("HTTP送信失敗");
-    }
-
-    // Read some bytes
-    let mut total = 0usize;
-    let mut buf = [0u8; 256];
-    loop {
-        match with_timeout(Duration::from_secs(2), socket.read(&mut buf)).await {
-            Ok(Ok(0)) => break, // closed
-            Ok(Ok(n)) => {
-                total += n;
-                if total > 64 { break; }
-            }
-            Ok(Err(_)) => return Err("HTTP受信失敗"),
-            Err(_) => break, // タイムアウト: データが来ないが接続できたのでOK
-        }
-    }
-    // 明示的にクローズしてソケットを解放
-    socket.close();
-    info!("HTTP GET応答受信: {}バイト", total);
-    Ok(())
+    Ok(stack)
 }
+
+/// 簡易SNTPでNTP時刻同期（JSTでログ）
+pub async fn sync_ntp_time(stack: embassy_net::Stack<'static>) -> Result<u64, &'static str> {
+    use embassy_net::dns::DnsQueryType;
+    use embassy_net::{IpAddress, IpEndpoint};
+    use embassy_net::udp::{UdpSocket, PacketMetadata};
+    use embassy_time::with_timeout;
+
+    // DNSでNTPサーバを引く（Aレコード）。
+    let addrs = with_timeout(Duration::from_secs(3), stack.dns_query("pool.ntp.org", DnsQueryType::A))
+        .await
+        .map_err(|_| "DNSタイムアウト")
+        .and_then(|r| r.map_err(|_| "DNS失敗"))?;
+    let server_ip = match addrs.first() {
+        Some(IpAddress::Ipv4(v4)) => *v4,
+        _ => return Err("IPv4未取得"),
+    };
+
+    let server = IpEndpoint::new(IpAddress::Ipv4(server_ip), 123);
+
+    // UDPソケットを一時利用
+    let mut rx_meta = [PacketMetadata::EMPTY; 2];
+    let mut tx_meta = [PacketMetadata::EMPTY; 2];
+    let mut rx_buf = [0u8; 512];
+    let mut tx_buf = [0u8; 64];
+    let mut udp = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    udp.bind(0).map_err(|_| "UDP bind失敗")?;
+
+    // NTPクライアントパケット（48B）: LI=0,VN=4,Mode=3 -> 0x23
+    let mut pkt = [0u8; 48];
+    pkt[0] = 0x23;
+
+    with_timeout(Duration::from_secs(2), udp.send_to(&pkt, server))
+        .await
+        .map_err(|_| "NTP送信タイムアウト")
+        .and_then(|r| r.map_err(|_| "NTP送信失敗"))?;
+
+    let mut buf = [0u8; 64];
+    let (n, _meta) = with_timeout(Duration::from_secs(2), udp.recv_from(&mut buf))
+        .await
+        .map_err(|_| "NTP受信タイムアウト")
+        .and_then(|r| r.map_err(|_| "NTP受信エラー"))?;
+    if n < 48 { return Err("NTP短小応答"); }
+
+    // 送信タイムスタンプ（40..44）をUNIXへ変換
+    let secs = u32::from_be_bytes([buf[40], buf[41], buf[42], buf[43]]) as u64;
+    const NTP_UNIX_DIFF: u64 = 2_208_988_800; // 1900->1970
+    if secs < NTP_UNIX_DIFF { return Err("NTP時刻不正"); }
+    let unix = secs - NTP_UNIX_DIFF;
+
+    // JST表示（HH:MM）
+    let local = unix + 9 * 3600;
+    let sec_day = local % 86_400;
+    let hh = sec_day / 3600;
+    let mm = (sec_day % 3600) / 60;
+    info!("インターネット接続成功！現在時刻: {:02}:{:02} JST", hh as u32, mm as u32);
+
+    Ok(unix)
+}
+
+// 旧HTTPテスト実装は削除（常時接続 + NTP 同期へ移行）
