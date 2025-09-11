@@ -60,7 +60,7 @@ pub async fn maintain_wifi_connection(
     mut control: &mut cyw43::Control<'_>,
     net_device: cyw43::NetDriver<'static>,
 ) -> Result<embassy_net::Stack<'static>, &'static str> {
-    use pico_w_id_beacon::wifi_config::{WIFI_PSK, WIFI_SSID};
+    use crate::settings::{WIFI_PSK, WIFI_SSID};
     use embassy_net::{Config, Stack, StackResources};
     use static_cell::StaticCell;
 
@@ -175,8 +175,12 @@ pub async fn sync_ntp_time(stack: embassy_net::Stack<'static>) -> Result<u64, &'
     let hh = sec_day / 3600;
     let mm = (sec_day % 3600) / 60;
     info!("インターネット接続成功！現在時刻: {:02}:{:02} JST", hh as u32, mm as u32);
+    // 時刻ベースを設定
+    crate::timekeeper::set_unix_time(unix);
 
     Ok(unix)
 }
+
+// （注意）Global Stack 共有は行っていない。必要なら別タスク化/設計見直しで対応。
 
 // 旧HTTPテスト実装は削除（常時接続 + NTP 同期へ移行）

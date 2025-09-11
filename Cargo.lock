@@ -241,8 +241,6 @@ dependencies = [
 [[package]]
 name = "cyw43"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85d050df7c6c6d253d1044fd5f011873ec6f434f77c202e7e7e88d5b12a1e943"
 dependencies = [
  "bt-hci",
  "cortex-m",

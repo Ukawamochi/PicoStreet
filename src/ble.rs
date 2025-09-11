@@ -34,6 +34,9 @@ impl EventHandler for RxHandler {
                 
                 let s = fmt_bytes_colon(&parsed.bd_addr);
                 info!("他デバイス検出 bd_addr={} rssi={}", s.as_str(), report.rssi);
+                // 現在時刻（NTP未同期時は0）
+                let now = crate::timekeeper::now_unix().unwrap_or(0);
+                let _ = crate::storage::save_encounter(parsed.bd_addr, now, report.rssi);
                 let v = RX_PULSES.load(Ordering::Relaxed);
                 RX_PULSES.store(v.saturating_add(1), Ordering::Relaxed);
             }
@@ -53,6 +56,8 @@ impl EventHandler for RxHandler {
                 
                 let s = fmt_bytes_colon(&parsed.bd_addr);
                 info!("他デバイス検出(拡張) bd_addr={} rssi={}", s.as_str(), report.rssi);
+                let now = crate::timekeeper::now_unix().unwrap_or(0);
+                let _ = crate::storage::save_encounter(parsed.bd_addr, now, report.rssi);
                 let v = RX_PULSES.load(Ordering::Relaxed);
                 RX_PULSES.store(v.saturating_add(1), Ordering::Relaxed);
             }
@@ -114,8 +119,9 @@ where
         let ad = build_advertisement_data(&mut ad_buf, payload);
         info!("BLE送信開始 len={}", ad.len());
         let mut params = AdvertisementParameters::default();
-        params.interval_min = Duration::from_millis(1200);
-        params.interval_max = Duration::from_millis(1500);
+        // 送信頻度: 3秒に1回（min/maxともに3秒）
+        params.interval_min = Duration::from_millis(3000);
+        params.interval_max = Duration::from_millis(3000);
         let _advertiser = match peripheral
             .advertise(
                 &params,
@@ -139,6 +145,10 @@ where
             cfg.timeout = Duration::from_millis(0);
             let mut last_pulse = Instant::now();
             loop {
+                // 保存件数が 1000 件を超えたらエラーブリンク
+                if crate::storage::total_saved() > 1000 {
+                    crate::leds::error_blink_loop(control).await;
+                }
                 let session = match scanner.scan(&cfg).await {
                     Ok(s) => s,
                     Err(_) => {

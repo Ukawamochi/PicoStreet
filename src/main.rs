@@ -15,6 +15,12 @@ use {defmt_rtt as _, embassy_time as _, panic_probe as _};
 mod ble;
 mod leds;
 mod wifi;
+mod timekeeper;
+mod storage;
+mod scheduler;
+mod api_client;
+#[path = "../settings.rs"]
+mod settings;
 use pico_w_id_beacon::device_id;
 use pico_w_id_beacon::format::fmt_bytes_colon;
 
@@ -101,21 +107,35 @@ async fn main(spawner: Spawner) {
 
     // まずWiFiへ接続し、DHCP完了後にNTP同期（BLEより優先、ただし短時間で完了）
     info!("WiFi接続とNTP同期を開始...");
-    let stack = match wifi::maintain_wifi_connection(spawner, &mut control, net_device).await {
-        Ok(s) => s,
+    let maybe_stack = match wifi::maintain_wifi_connection(spawner, &mut control, net_device).await {
+        Ok(s) => {
+            // NTP時刻同期（失敗しても続行）
+            if let Err(e) = wifi::sync_ntp_time(s).await {
+                warn!("NTP同期に失敗: {}", e);
+            }
+            Some(s)
+        }
         Err(e) => {
             warn!("WiFi初期化に失敗しました: {}", e);
-            // WiFi無しで継続（BLE優先）
-            ble::advertise_and_scan_loop(controller, &mut control, self_bd_addr).await;
+            None
         }
     };
 
-    // NTP時刻同期（失敗しても続行）
-    if let Err(e) = wifi::sync_ntp_time(stack).await {
-        warn!("NTP同期に失敗: {}", e);
+    // 送信スケジューラを起動（Dev:30秒/Prod:3時）
+    if let Some(stack) = maybe_stack {
+        if let Err(_e) = spawner.spawn(crate::scheduler::uploader_task(stack, self_bd_addr)) {
+            warn!("スケジューラ起動失敗");
+        }
+    } else {
+        // WiFi未接続時は開発モードの心拍ログを起動
+        let _ = spawner.spawn(crate::scheduler::dev_heartbeat());
     }
 
-    info!("WiFi/NTP完了。BLE機能を開始します...");
+    if maybe_stack.is_some() {
+        info!("WiFi/NTP完了。BLE機能を開始します...");
+    } else {
+        info!("WiFi未接続。BLE機能を開始します...");
+    }
     info!("BLEホスト/コントローラ接続完了");
 
     // 時分割ループ開始（広告→スキャン）
