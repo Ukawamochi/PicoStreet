@@ -17,6 +17,10 @@ embassy-sync = { version = "0.7", features = ["defmt"] }
 cyw43 = { version = "0.5.0", features = ["defmt", "firmware-logs", "bluetooth"] }
 cyw43-pio = { version = "0.8.0", features = ["defmt"] }
 
+# Optional: Embassy network stack for WiFi tests
+embassy-net = { version = "0.6.0", default-features = false, features = ["defmt", "tcp", "udp", "dns", "proto-ipv4", "dhcpv4", "medium-ethernet"], optional = true }
+embedded-io-async = { version = "0.6", optional = true }
+
 # BLE Host (TrouBLE)
 trouble-host = { git = "https://github.com/embassy-rs/trouble", default-features = true, features = ["scan", "defmt"] }
 bt-hci = { version = "0.4" }
@@ -40,6 +44,7 @@ pretty_assertions = "1.4"
 [features]
 # Optionally allow building without bundling firmware (for compile-checks on CI)
 skip-cyw43-firmware = []
+wifi = ["dep:embassy-net", "dep:embedded-io-async"]
 
 [profile.release]
 debug = 2

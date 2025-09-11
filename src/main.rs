@@ -14,6 +14,7 @@ use {defmt_rtt as _, embassy_time as _, panic_probe as _};
 //BLEとLEDを別モジュールで制御
 mod ble;
 mod leds;
+mod wifi;
 use pico_w_id_beacon::device_id;
 use pico_w_id_beacon::format::fmt_bytes_colon;
 
@@ -63,7 +64,7 @@ async fn main(spawner: Spawner) {
 
     static STATE: StaticCell<cyw43::State> = StaticCell::new();
     let state = STATE.init(cyw43::State::new());
-    let (_net_device, bt_device, mut control, runner) = cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw).await;
+    let (net_device, bt_device, mut control, runner) = cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw).await;
     spawner.spawn(cyw43_task(runner)).unwrap();
     control.init(clm).await;
     // 初期状態の内蔵LED消灯
@@ -89,7 +90,16 @@ async fn main(spawner: Spawner) {
 
     // BLE Host に接続
     let controller: ExternalController<_, 10> = ExternalController::new(bt_device);
-    info!("BLE host/controller wired");
+
+    // WiFi接続を開始しつつ、BLE初期化と並行実行
+    // （制御LEDの独占を避けるため、WiFi完了後にBLEのLED制御を開始）
+    info!("Starting WiFi connect while BLE initializes...");
+    let _ = embassy_futures::join::join(
+        wifi::connect_and_test(spawner, &mut control, net_device),
+        async {
+            info!("BLE host/controller wired");
+        },
+    ).await;
 
     // 時分割ループ開始（広告→スキャン）
     ble::advertise_and_scan_loop(controller, &mut control, self_bd_addr).await;

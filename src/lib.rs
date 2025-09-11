@@ -13,3 +13,8 @@ pub mod constants {
 pub mod adv_payload;
 pub mod device_id;
 pub mod format;
+
+// WiFi config (kept outside src to avoid committing secrets).
+// Make available to the binary via the crate path `pico_w_id_beacon::wifi_config`.
+#[path = "../wifi_config.rs"]
+pub mod wifi_config;
